@@ -6,9 +6,16 @@ Convert data from XML format -> dataframe
 import pandas as pd
 import numpy as np
 from bs4 import *
+import sys
 
 """Load data"""
-filename = 'sample_data.txt'
+try:
+    filename = sys.argv[1]
+except:
+    print('Execute pipeline with the following syntax:')
+    print('python preprocces.py <filename>')
+    sys.exit()
+
 data = open(filename,'r')
 soup = BeautifulSoup(data,'lxml')
 
@@ -31,14 +38,12 @@ label_df = pd.DataFrame(conditions_encoded,columns=classes).astype(int)
 
 """Extract relevant information from each field for all objects"""
 cols = ['date', 'time', 'height', 'width', 'length', 'volume', 'weight', 'angle', 'velocity', 'velocity_units',
-        'belt_velocity', \
-        'belt_velocity_units']
+        'belt_velocity','belt_velocity_units']
 # Initialize dictionary for storing extracted data
 data = {}
 for obj in soup.find_all('objectdata'):
     # Time stamp
     [date, time] = obj.timestamp.contents[0].split('T')
-    data
     # Gap information
     gap = float(obj.oga.value.contents[0])
     # Item volume
@@ -67,4 +72,4 @@ df = pd.DataFrame(data)
 # Add labels
 df = df.join(label_df)
 # Save as csv
-# df.to_csv('sampledata.csv', index=False)
+df.to_csv('sampledata.csv', index=False)
