@@ -5,7 +5,6 @@ Convert data from XML format -> dataframe
 """
 import pandas as pd
 import numpy as np
-import xml.etree.ElementTree as ET
 from bs4 import *
 
 """Load data"""
