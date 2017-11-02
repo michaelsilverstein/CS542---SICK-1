@@ -2,7 +2,6 @@ from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
 # install PyDrive : pip install PyDrive
-
 # need to store client_secrets in the same working directory
 
 gauth = GoogleAuth()
