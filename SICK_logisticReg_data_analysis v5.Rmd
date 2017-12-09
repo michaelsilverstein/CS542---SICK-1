@@ -1,0 +1,528 @@
+---
+title: "CS542 Project"
+author: "Michael Silverstein, Long Nguyen, Seunghun Oh, Wayne Wang"
+date: "November 18, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Data subsetting: Do not run this block of code unless you want to recreate subsets
+sick <- read.csv('C:/Users/Wayne/Desktop/CS542_MachineLearning/Project/all_data_sick.csv')
+#sick = read.csv("//ace/data/case2/SLR_using_ML_980115/Test/Data/all_processed_data.csv")
+sick = subset(sick, !is.na(weight))
+
+# create subset for cross validation
+m = nrow(sick)
+numSets = 11 # numSets-1 for cross validation, 1 for testing
+n = round(m / numSets)
+bin = seq(0,n*numSets,by=n)
+sick$shuffle = runif(m,min=0,max=1)
+sick = sick[order(sick$shuffle),]
+sick$id = 1:m
+sick$set = cut(sick$id, breaks=bin , labels=c(seq(1:numSets)))
+table(sick$set)
+
+save(sick, file="sick.rds")
+```
+
+```{r}
+# start here
+load("sick.rds")
+numSets = 11 # numSets-1 for cross validation, 1 for testing
+head(sick)
+```
+
+## Exploratory data analysis
+
+```{r}
+with(sick, boxplot(time ~ LFT, ylab = "time in sec", xlab = "Legal for Trade" , main="time of day package is processed boxplot"))
+with(sick, boxplot(volume ~ LFT, ylim = c(-100, 50000), ylab = "volume of package", xlab = "Legal for Trade", main="volume of package boxplot"))
+with(sick, boxplot(weight ~ LFT, ylab = "weight of package", xlab = "Legal for Trade", main="weight of package boxplot"))
+with(sick, boxplot(gap ~ LFT, ylab = "weight of package", xlab = "Legal for Trade", main="gap of package boxplot"))
+sick$gap2 = ifelse(sick$gap < 0, 0, sick$gap)
+```
+
+```{r}
+# total positive data
+sum(sick$LFT)/m
+```
+
+
+## Model selection based on Akaike information criterion (logit)
+
+```{r}
+mod1 <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial)
+mod1AIC <- step(mod1)
+summary(mod1AIC)
+```
+
+```{r}
+# accuracy of logit link with AIC
+sick$mod1AICresponse = predict(mod1AIC, sick, type="response")
+sick$mod1AICpred = ifelse(sick$mod1AICresponse >= 0.5, 1, 0)
+sick$mod1AICaccuracy = abs(sick$LFT - sick$mod1AICpred)
+m = nrow(sick)
+accuracyMod1AIC = (m - sum(sick$mod1AICaccuracy, na.rm=T))/m
+accuracyMod1AIC
+sick$mod1AIC.TP = ifelse(sick$mod1AICpred == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.FP = ifelse(sick$mod1AICpred == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.TN = ifelse(sick$mod1AICpred == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.FN = ifelse(sick$mod1AICpred == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.TPtotal = sum(sick$mod1AIC.TP, na.rm=T)
+mod1AIC.FPtotal = sum(sick$mod1AIC.FP, na.rm=T)
+mod1AIC.TNtotal = sum(sick$mod1AIC.TN, na.rm=T)
+mod1AIC.FNtotal = sum(sick$mod1AIC.FN, na.rm=T)
+mod1AIC.TPtotal
+mod1AIC.FPtotal
+mod1AIC.TNtotal
+mod1AIC.FNtotal
+mod1AIC.precision = mod1AIC.TPtotal/(mod1AIC.TPtotal + mod1AIC.FPtotal)
+mod1AIC.recall = mod1AIC.TPtotal/(mod1AIC.TPtotal + mod1AIC.FNtotal)
+mod1AIC.F1score = 2*mod1AIC.precision*mod1AIC.recall/(mod1AIC.precision+mod1AIC.recall)
+mod1AIC.precision
+mod1AIC.recall
+mod1AIC.F1score
+```
+
+## Model selection based on ANOVA/p-values (logit)
+
+```{r}
+# mod1 <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(ValidDim) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial)
+mod1a = update(mod1, . ~ . - as.factor(weekday))
+mod1b = update(mod1a, . ~ . - as.factor(Gap))
+mod1c = update(mod1b, . ~ . - as.factor(TooSmall))
+mod1d = update(mod1c, . ~ . - as.factor(Irreg))
+mod1e = update(mod1d, . ~ . - as.factor(TooBig))
+mod1f = update(mod1e, . ~ . - belt_velocity)
+mod1g = update(mod1f, . ~ . - velocity)
+mod1h = update(mod1g, . ~ . - gap2)
+mod1i = update(mod1h, . ~ . - angle)
+mod1j = update(mod1i, . ~ . - weight)
+mod1k = update(mod1j, . ~ . - volume)
+mod1l = update(mod1k, . ~ . - time)
+anova(mod1l, mod1k, mod1j, mod1i, mod1h, mod1g, mod1f, mod1e, mod1d, mod1c, mod1b, mod1a, mod1, test = "LRT")
+```
+
+```{r}
+# model selected based on ANOVA (p-values) and its accuracy (logit)
+mod1ANOVA <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial)
+
+sick$mod1ANOVAresponse = predict(mod1ANOVA, sick, type="response")
+sick$mod1ANOVApred = ifelse(sick$mod1ANOVAresponse >= 0.5, 1, 0)
+sick$mod1ANOVAaccuracy = abs(sick$LFT - sick$mod1ANOVApred)
+m = nrow(sick)
+accuracyMod1ANOVA = (m - sum(sick$mod1ANOVAaccuracy, na.rm=T))/m
+accuracyMod1ANOVA
+sick$mod1ANOVA.TP = ifelse(sick$mod1ANOVApred == 1 & sick$LFT == 1, 1, 0)
+sick$mod1ANOVA.FP = ifelse(sick$mod1ANOVApred == 1 & sick$LFT == 0, 1, 0)
+sick$mod1ANOVA.TN = ifelse(sick$mod1ANOVApred == 0 & sick$LFT == 0, 1, 0)
+sick$mod1ANOVA.FN = ifelse(sick$mod1ANOVApred == 0 & sick$LFT == 1, 1, 0)
+mod1ANOVA.TPtotal = sum(sick$mod1ANOVA.TP, na.rm=T)
+mod1ANOVA.FPtotal = sum(sick$mod1ANOVA.FP, na.rm=T)
+mod1ANOVA.TNtotal = sum(sick$mod1ANOVA.TN, na.rm=T)
+mod1ANOVA.FNtotal = sum(sick$mod1ANOVA.FN, na.rm=T)
+mod1ANOVA.TPtotal
+mod1ANOVA.FPtotal
+mod1ANOVA.TNtotal
+mod1ANOVA.FNtotal
+mod1ANOVA.precision = mod1ANOVA.TPtotal/(mod1ANOVA.TPtotal + mod1ANOVA.FPtotal)
+mod1ANOVA.recall = mod1ANOVA.TPtotal/(mod1ANOVA.TPtotal + mod1ANOVA.FNtotal)
+mod1ANOVA.F1score = 2*mod1ANOVA.precision*mod1ANOVA.recall/(mod1ANOVA.precision+mod1ANOVA.recall)
+mod1ANOVA.precision
+mod1ANOVA.recall
+mod1ANOVA.F1score
+```
+
+## Model selection based on Akaike information criterion (c-loglog)
+
+```{r}
+mod2 <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="cloglog"))
+mod2AIC <- step(mod2)
+summary(mod2AIC)
+```
+
+```{r}
+# accuracy of c-loglog link with AIC
+sick$mod2AICresponse = predict(mod2AIC, sick, type="response")
+sick$mod2AICpred = ifelse(sick$mod2AICresponse >= 0.5, 1, 0)
+sick$mod2AICaccuracy = abs(sick$LFT - sick$mod2AICpred)
+m = nrow(sick)
+accuracyMod2AIC = (m - sum(sick$mod2AICaccuracy, na.rm=T))/m
+accuracyMod2AIC
+sick$mod2AIC.TP = ifelse(sick$mod2AICpred == 1 & sick$LFT == 1, 1, 0)
+sick$mod2AIC.FP = ifelse(sick$mod2AICpred == 1 & sick$LFT == 0, 1, 0)
+sick$mod2AIC.TN = ifelse(sick$mod2AICpred == 0 & sick$LFT == 0, 1, 0)
+sick$mod2AIC.FN = ifelse(sick$mod2AICpred == 0 & sick$LFT == 1, 1, 0)
+mod2AIC.TPtotal = sum(sick$mod2AIC.TP, na.rm=T)
+mod2AIC.FPtotal = sum(sick$mod2AIC.FP, na.rm=T)
+mod2AIC.TNtotal = sum(sick$mod2AIC.TN, na.rm=T)
+mod2AIC.FNtotal = sum(sick$mod2AIC.FN, na.rm=T)
+mod2AIC.TPtotal
+mod2AIC.FPtotal
+mod2AIC.TNtotal
+mod2AIC.FNtotal
+mod2AIC.precision = mod2AIC.TPtotal/(mod2AIC.TPtotal + mod2AIC.FPtotal)
+mod2AIC.recall = mod2AIC.TPtotal/(mod2AIC.TPtotal + mod2AIC.FNtotal)
+mod2AIC.F1score = 2*mod2AIC.precision*mod2AIC.recall/(mod2AIC.precision+mod2AIC.recall)
+mod2AIC.precision
+mod2AIC.recall
+mod2AIC.F1score
+```
+
+## Model selection based on ANOVA/p-values (c-loglog)
+
+```{r}
+# mod2 <- glm(LFT ~ time + volume + weight + angle + gap + velocity + belt_velocity + as.factor(TooBig) + as.factor(ValidDim) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="cloglog"))
+mod2a = update(mod2, . ~ . - as.factor(weekday))
+mod2b = update(mod2a, . ~ . - as.factor(Gap))
+mod2c = update(mod2b, . ~ . - as.factor(TooSmall))
+mod2d = update(mod2c, . ~ . - as.factor(Irreg))
+mod2e = update(mod2d, . ~ . - as.factor(TooBig))
+mod2f = update(mod2e, . ~ . - belt_velocity)
+mod2g = update(mod2f, . ~ . - velocity)
+mod2h = update(mod2g, . ~ . - gap2)
+mod2i = update(mod2h, . ~ . - angle)
+mod2j = update(mod2i, . ~ . - weight)
+mod2k = update(mod2j, . ~ . - volume)
+mod2l = update(mod2k, . ~ . - time)
+anova(mod2l, mod2k, mod2j, mod2i, mod2h, mod2g, mod2f, mod2e, mod2d, mod2c, mod2b, mod2a, mod2, test = "LRT")
+```
+
+```{r}
+# model selected based on ANOVA (p-values) and its accuracy (cloglog)
+mod2ANOVA <- glm(LFT ~ time + volume + weight + angle + gap2 + belt_velocity + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="cloglog"))
+
+sick$mod2ANOVAresponse = predict(mod2ANOVA, sick, type="response")
+sick$mod2ANOVApred = ifelse(sick$mod2ANOVAresponse >= 0.5, 1, 0)
+sick$mod2ANOVAaccuracy = abs(sick$LFT - sick$mod2ANOVApred)
+m = nrow(sick)
+accuracyMod2ANOVA = (m - sum(sick$mod2ANOVAaccuracy, na.rm=T))/m
+accuracyMod2ANOVA
+sick$mod2ANOVA.TP = ifelse(sick$mod2ANOVApred == 1 & sick$LFT == 1, 1, 0)
+sick$mod2ANOVA.FP = ifelse(sick$mod2ANOVApred == 1 & sick$LFT == 0, 1, 0)
+sick$mod2ANOVA.TN = ifelse(sick$mod2ANOVApred == 0 & sick$LFT == 0, 1, 0)
+sick$mod2ANOVA.FN = ifelse(sick$mod2ANOVApred == 0 & sick$LFT == 1, 1, 0)
+mod2ANOVA.TPtotal = sum(sick$mod2ANOVA.TP, na.rm=T)
+mod2ANOVA.FPtotal = sum(sick$mod2ANOVA.FP, na.rm=T)
+mod2ANOVA.TNtotal = sum(sick$mod2ANOVA.TN, na.rm=T)
+mod2ANOVA.FNtotal = sum(sick$mod2ANOVA.FN, na.rm=T)
+mod2ANOVA.TPtotal
+mod2ANOVA.FPtotal
+mod2ANOVA.TNtotal
+mod2ANOVA.FNtotal
+mod2ANOVA.precision = mod2ANOVA.TPtotal/(mod2ANOVA.TPtotal + mod2ANOVA.FPtotal)
+mod2ANOVA.recall = mod2ANOVA.TPtotal/(mod2ANOVA.TPtotal + mod2ANOVA.FNtotal)
+mod2ANOVA.F1score = 2*mod2ANOVA.precision*mod2ANOVA.recall/(mod2ANOVA.precision+mod2ANOVA.recall)
+mod2ANOVA.precision
+mod2ANOVA.recall
+mod2ANOVA.F1score
+```
+
+## Model selection based on Akaike information criterion (probit)
+
+```{r}
+mod3 <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="probit"))
+mod3AIC <- step(mod3)
+summary(mod3AIC)
+```
+
+```{r}
+# accuracy of probit link with AIC
+sick$mod3AICresponse = predict(mod3AIC, sick, type="response")
+sick$mod3AICpred = ifelse(sick$mod3AICresponse >= 0.5, 1, 0)
+sick$mod3AICaccuracy = abs(sick$LFT - sick$mod3AICpred)
+m = nrow(sick)
+accuracyMod3AIC = (m - sum(sick$mod3AICaccuracy, na.rm=T))/m
+accuracyMod3AIC
+sick$mod3AIC.TP = ifelse(sick$mod3AICpred == 1 & sick$LFT == 1, 1, 0)
+sick$mod3AIC.FP = ifelse(sick$mod3AICpred == 1 & sick$LFT == 0, 1, 0)
+sick$mod3AIC.TN = ifelse(sick$mod3AICpred == 0 & sick$LFT == 0, 1, 0)
+sick$mod3AIC.FN = ifelse(sick$mod3AICpred == 0 & sick$LFT == 1, 1, 0)
+mod3AIC.TPtotal = sum(sick$mod3AIC.TP, na.rm=T)
+mod3AIC.FPtotal = sum(sick$mod3AIC.FP, na.rm=T)
+mod3AIC.TNtotal = sum(sick$mod3AIC.TN, na.rm=T)
+mod3AIC.FNtotal = sum(sick$mod3AIC.FN, na.rm=T)
+mod3AIC.TPtotal
+mod3AIC.FPtotal
+mod3AIC.TNtotal
+mod3AIC.FNtotal
+mod3AIC.precision = mod3AIC.TPtotal/(mod3AIC.TPtotal + mod3AIC.FPtotal)
+mod3AIC.recall = mod3AIC.TPtotal/(mod3AIC.TPtotal + mod3AIC.FNtotal)
+mod3AIC.F1score = 2*mod3AIC.precision*mod3AIC.recall/(mod3AIC.precision+mod3AIC.recall)
+mod3AIC.precision
+mod3AIC.recall
+mod3AIC.F1score
+```
+
+## Model selection based on ANOVA/p-values (probit)
+
+```{r}
+# mod3 <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(ValidDim) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="probit"))
+mod3a = update(mod3, . ~ . - as.factor(weekday))
+mod3b = update(mod3a, . ~ . - as.factor(Gap))
+mod3c = update(mod3b, . ~ . - as.factor(TooSmall))
+mod3d = update(mod3c, . ~ . - as.factor(Irreg))
+mod3e = update(mod3d, . ~ . - as.factor(TooBig))
+mod3f = update(mod3e, . ~ . - belt_velocity)
+mod3g = update(mod3f, . ~ . - velocity)
+mod3h = update(mod3g, . ~ . - gap2)
+mod3i = update(mod3h, . ~ . - angle)
+mod3j = update(mod3i, . ~ . - weight)
+mod3k = update(mod3j, . ~ . - volume)
+mod3l = update(mod3k, . ~ . - time)
+anova(mod3l, mod3k, mod3j, mod3i, mod3h, mod3g, mod3f, mod3e, mod3d, mod3c, mod3b, mod3a, mod3, test = "LRT")
+```
+
+```{r}
+# model selected based on ANOVA (p-values) and its accuracy (probit)
+mod3ANOVA <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity + as.factor(TooBig) + as.factor(Irreg) + as.factor(TooSmall) + as.factor(Gap) + as.factor(weekday), data = sick, family = binomial(link="probit"))
+
+sick$mod3ANOVAresponse = predict(mod3ANOVA, sick, type="response")
+sick$mod3ANOVApred = ifelse(sick$mod3ANOVAresponse >= 0.5, 1, 0)
+sick$mod3ANOVAaccuracy = abs(sick$LFT - sick$mod3ANOVApred)
+m = nrow(sick)
+accuracyMod3ANOVA = (m - sum(sick$mod3ANOVAaccuracy, na.rm=T))/m
+accuracyMod3ANOVA
+sick$mod3ANOVA.TP = ifelse(sick$mod3ANOVApred == 1 & sick$LFT == 1, 1, 0)
+sick$mod3ANOVA.FP = ifelse(sick$mod3ANOVApred == 1 & sick$LFT == 0, 1, 0)
+sick$mod3ANOVA.TN = ifelse(sick$mod3ANOVApred == 0 & sick$LFT == 0, 1, 0)
+sick$mod3ANOVA.FN = ifelse(sick$mod3ANOVApred == 0 & sick$LFT == 1, 1, 0)
+mod3ANOVA.TPtotal = sum(sick$mod3ANOVA.TP, na.rm=T)
+mod3ANOVA.FPtotal = sum(sick$mod3ANOVA.FP, na.rm=T)
+mod3ANOVA.TNtotal = sum(sick$mod3ANOVA.TN, na.rm=T)
+mod3ANOVA.FNtotal = sum(sick$mod3ANOVA.FN, na.rm=T)
+mod3ANOVA.TPtotal
+mod3ANOVA.FPtotal
+mod3ANOVA.TNtotal
+mod3ANOVA.FNtotal
+mod3ANOVA.precision = mod3ANOVA.TPtotal/(mod3ANOVA.TPtotal + mod3ANOVA.FPtotal)
+mod3ANOVA.recall = mod3ANOVA.TPtotal/(mod3ANOVA.TPtotal + mod3ANOVA.FNtotal)
+mod3ANOVA.F1score = 2*mod3ANOVA.precision*mod3ANOVA.recall/(mod3ANOVA.precision+mod3ANOVA.recall)
+mod3ANOVA.precision
+mod3ANOVA.recall
+mod3ANOVA.F1score
+```
+
+## Cross Validation (logit)
+
+```{r}
+mod1AIC.cv.temp = list()
+mod2ANOVA.cv.temp = list()
+testing = subset(sick, set == numSets)
+for(i in 1:(numSets-1)){
+  print(paste("now at subset ", i))
+  validation = subset(sick, set == i )
+  training = subset(sick, set != i || set != numSets)
+  LFT = validation$LFT
+  
+  #AIC model
+  mod = glm(mod1AIC$formula , data = training, family = binomial)
+  response = predict(mod, validation, type = "response")
+  mod1AIC.cv.temp[[i]] = data.frame(LFT,response)
+  
+  #ANOVA model
+  modANOVA = glm(mod2ANOVA$formula, data = training, family = binomial(link="cloglog"))
+  responseANOVA = predict(modANOVA, validation, type="response")
+  mod2ANOVA.cv.temp[[i]] = data.frame(LFT, responseANOVA)
+}
+
+#AIC accuracy
+mod1AIC.cv = do.call(rbind, mod1AIC.cv.temp)
+mod1AIC.cv$mod1pred = ifelse(mod1AIC.cv$response >= 0.5, 1, 0)
+mod1AIC.cv$mod1accuracy = abs(mod1AIC.cv$LFT - mod1AIC.cv$mod1pred)
+
+#ANOVA accuracy
+mod2ANOVA.cv = do.call(rbind, mod2ANOVA.cv.temp)
+mod2ANOVA.cv$mod2pred = ifelse(mod2ANOVA.cv$response >= 0.5, 1, 0)
+mod2ANOVA.cv$mod2accuracy = abs(mod2ANOVA.cv$LFT - mod2ANOVA.cv$mod2pred)
+
+cat("mod1AIC accuracy:" , (nrow(mod1AIC.cv) - sum(mod1AIC.cv$mod1accuracy, na.rm=T))/nrow(mod1AIC.cv) , "\n", "mod2ANOVA accuracy:" , (nrow(mod2ANOVA.cv) - sum(mod2ANOVA.cv$mod2accuracy, na.rm=T))/nrow(mod2ANOVA.cv) ) 
+
+mod1AIC.cv$mod1.TP = ifelse(mod1AIC.cv$mod1pred == 1 & mod1AIC.cv$LFT == 1, 1, 0)
+mod1AIC.cv$mod1.FP = ifelse(mod1AIC.cv$mod1pred == 1 & mod1AIC.cv$LFT == 0, 1, 0)
+mod1AIC.cv$mod1.TN = ifelse(mod1AIC.cv$mod1pred == 0 & mod1AIC.cv$LFT == 0, 1, 0)
+mod1AIC.cv$mod1.FN = ifelse(mod1AIC.cv$mod1pred == 0 & mod1AIC.cv$LFT == 1, 1, 0)
+mod1AIC.cv.TPtotal = sum(mod1AIC.cv$mod1.TP, na.rm=T)
+mod1AIC.cv.FPtotal = sum(mod1AIC.cv$mod1.FP, na.rm=T)
+mod1AIC.cv.TNtotal = sum(mod1AIC.cv$mod1.TN, na.rm=T)
+mod1AIC.cv.FNtotal = sum(mod1AIC.cv$mod1.FN, na.rm=T)
+mod1AIC.cv.TPtotal
+mod1AIC.cv.FPtotal
+mod1AIC.cv.TNtotal
+mod1AIC.cv.FNtotal
+mod1AIC.cv.precision = mod1AIC.cv.TPtotal / (mod1AIC.cv.TPtotal + mod1AIC.cv.FPtotal)
+mod1AIC.cv.recall = mod1AIC.cv.TPtotal / (mod1AIC.cv.TPtotal + mod1AIC.cv.FNtotal)
+mod1AIC.cv.F1score = 2*mod1AIC.cv.precision*mod1AIC.cv.recall / (mod1AIC.cv.precision+mod1AIC.cv.recall)
+mod1AIC.cv.precision
+mod1AIC.cv.recall
+mod1AIC.cv.F1score
+
+mod2ANOVA.cv$mod2.TP = ifelse(mod2ANOVA.cv$mod2pred == 1 & mod2ANOVA.cv$LFT == 1, 1, 0)
+mod2ANOVA.cv$mod2.FP = ifelse(mod2ANOVA.cv$mod2pred == 1 & mod2ANOVA.cv$LFT == 0, 1, 0)
+mod2ANOVA.cv$mod2.TN = ifelse(mod2ANOVA.cv$mod2pred == 0 & mod2ANOVA.cv$LFT == 0, 1, 0)
+mod2ANOVA.cv$mod2.FN = ifelse(mod2ANOVA.cv$mod2pred == 0 & mod2ANOVA.cv$LFT == 1, 1, 0)
+mod2ANOVA.cv.TPtotal = sum(mod2ANOVA.cv$mod2.TP, na.rm=T)
+mod2ANOVA.cv.FPtotal = sum(mod2ANOVA.cv$mod2.FP, na.rm=T)
+mod2ANOVA.cv.TNtotal = sum(mod2ANOVA.cv$mod2.TN, na.rm=T)
+mod2ANOVA.cv.FNtotal = sum(mod2ANOVA.cv$mod2.FN, na.rm=T)
+mod2ANOVA.cv.TPtotal
+mod2ANOVA.cv.FPtotal
+mod2ANOVA.cv.TNtotal
+mod2ANOVA.cv.FNtotal
+mod2ANOVA.cv.precision = mod2ANOVA.cv.TPtotal / (mod2ANOVA.cv.TPtotal + mod2ANOVA.cv.FPtotal)
+mod2ANOVA.cv.recall = mod2ANOVA.cv.TPtotal / (mod2ANOVA.cv.TPtotal + mod2ANOVA.cv.FNtotal)
+mod2ANOVA.cv.F1score = 2*mod2ANOVA.cv.precision*mod2ANOVA.cv.recall / (mod2ANOVA.cv.precision+mod2ANOVA.cv.recall)
+mod2ANOVA.cv.precision
+mod2ANOVA.cv.recall
+mod2ANOVA.cv.F1score
+```
+
+```{r}
+sick$mod1AICresponse = predict(mod1AIC, sick, type="response")
+sick$mod1AICpred.45 = ifelse(sick$mod1AICresponse >= 0.45, 1, 0)
+sick$mod1AICpred.55 = ifelse(sick$mod1AICresponse >= 0.55, 1, 0)
+
+sick$mod1AIC.45TP = ifelse(sick$mod1AICpred.45 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.45FP = ifelse(sick$mod1AICpred.45 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.45TN = ifelse(sick$mod1AICpred.45 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.45FN = ifelse(sick$mod1AICpred.45 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.45TPtotal = sum(sick$mod1AIC.45TP, na.rm=T)
+mod1AIC.45FPtotal = sum(sick$mod1AIC.45FP, na.rm=T)
+mod1AIC.45TNtotal = sum(sick$mod1AIC.45TN, na.rm=T)
+mod1AIC.45FNtotal = sum(sick$mod1AIC.45FN, na.rm=T)
+
+mod1AIC.45precision = mod1AIC.45TPtotal/(mod1AIC.45TPtotal + mod1AIC.45FPtotal)
+mod1AIC.45recall = mod1AIC.45TPtotal/(mod1AIC.45TPtotal + mod1AIC.45FNtotal)
+
+sick$mod1AIC.55TP = ifelse(sick$mod1AICpred.55 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.55FP = ifelse(sick$mod1AICpred.55 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.55TN = ifelse(sick$mod1AICpred.55 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.55FN = ifelse(sick$mod1AICpred.55 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.55TPtotal = sum(sick$mod1AIC.55TP, na.rm=T)
+mod1AIC.55FPtotal = sum(sick$mod1AIC.55FP, na.rm=T)
+mod1AIC.55TNtotal = sum(sick$mod1AIC.55TN, na.rm=T)
+mod1AIC.55FNtotal = sum(sick$mod1AIC.55FN, na.rm=T)
+
+mod1AIC.55precision = mod1AIC.55TPtotal/(mod1AIC.55TPtotal + mod1AIC.55FPtotal)
+mod1AIC.55recall = mod1AIC.55TPtotal/(mod1AIC.55TPtotal + mod1AIC.55FNtotal)
+
+mod1AIC.45precision
+mod1AIC.45recall
+
+mod1AIC.55precision
+mod1AIC.55recall
+```
+
+```{r}
+sick$mod1AICresponse = predict(mod1AIC, sick, type="response")
+sick$mod1AICpred.40 = ifelse(sick$mod1AICresponse >= 0.4, 1, 0)
+sick$mod1AICpred.60 = ifelse(sick$mod1AICresponse >= 0.6, 1, 0)
+
+sick$mod1AIC.40TP = ifelse(sick$mod1AICpred.40 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.40FP = ifelse(sick$mod1AICpred.40 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.40TN = ifelse(sick$mod1AICpred.40 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.40FN = ifelse(sick$mod1AICpred.40 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.40TPtotal = sum(sick$mod1AIC.40TP, na.rm=T)
+mod1AIC.40FPtotal = sum(sick$mod1AIC.40FP, na.rm=T)
+mod1AIC.40TNtotal = sum(sick$mod1AIC.40TN, na.rm=T)
+mod1AIC.40FNtotal = sum(sick$mod1AIC.40FN, na.rm=T)
+
+mod1AIC.40precision = mod1AIC.40TPtotal/(mod1AIC.40TPtotal + mod1AIC.40FPtotal)
+mod1AIC.40recall = mod1AIC.40TPtotal/(mod1AIC.40TPtotal + mod1AIC.40FNtotal)
+
+sick$mod1AIC.60TP = ifelse(sick$mod1AICpred.60 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.60FP = ifelse(sick$mod1AICpred.60 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.60TN = ifelse(sick$mod1AICpred.60 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.60FN = ifelse(sick$mod1AICpred.60 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.60TPtotal = sum(sick$mod1AIC.60TP, na.rm=T)
+mod1AIC.60FPtotal = sum(sick$mod1AIC.60FP, na.rm=T)
+mod1AIC.60TNtotal = sum(sick$mod1AIC.60TN, na.rm=T)
+mod1AIC.60FNtotal = sum(sick$mod1AIC.60FN, na.rm=T)
+
+mod1AIC.60precision = mod1AIC.60TPtotal/(mod1AIC.60TPtotal + mod1AIC.60FPtotal)
+mod1AIC.60recall = mod1AIC.60TPtotal/(mod1AIC.60TPtotal + mod1AIC.60FNtotal)
+
+mod1AIC.40precision
+mod1AIC.40recall
+
+mod1AIC.60precision
+mod1AIC.60recall
+```
+
+```{r}
+sick$mod1AICresponse = predict(mod1AIC, sick, type="response")
+sick$mod1AICpred.35 = ifelse(sick$mod1AICresponse >= 0.35, 1, 0)
+sick$mod1AICpred.65 = ifelse(sick$mod1AICresponse >= 0.65, 1, 0)
+
+sick$mod1AIC.35TP = ifelse(sick$mod1AICpred.35 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.35FP = ifelse(sick$mod1AICpred.35 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.35TN = ifelse(sick$mod1AICpred.35 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.35FN = ifelse(sick$mod1AICpred.35 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.35TPtotal = sum(sick$mod1AIC.35TP, na.rm=T)
+mod1AIC.35FPtotal = sum(sick$mod1AIC.35FP, na.rm=T)
+mod1AIC.35TNtotal = sum(sick$mod1AIC.35TN, na.rm=T)
+mod1AIC.35FNtotal = sum(sick$mod1AIC.35FN, na.rm=T)
+
+mod1AIC.35precision = mod1AIC.35TPtotal/(mod1AIC.35TPtotal + mod1AIC.35FPtotal)
+mod1AIC.35recall = mod1AIC.35TPtotal/(mod1AIC.40TPtotal + mod1AIC.35FNtotal)
+
+sick$mod1AIC.65TP = ifelse(sick$mod1AICpred.65 == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.65FP = ifelse(sick$mod1AICpred.65 == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.65TN = ifelse(sick$mod1AICpred.65 == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.65FN = ifelse(sick$mod1AICpred.65 == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.65TPtotal = sum(sick$mod1AIC.65TP, na.rm=T)
+mod1AIC.65FPtotal = sum(sick$mod1AIC.65FP, na.rm=T)
+mod1AIC.65TNtotal = sum(sick$mod1AIC.65TN, na.rm=T)
+mod1AIC.65FNtotal = sum(sick$mod1AIC.65FN, na.rm=T)
+
+mod1AIC.65precision = mod1AIC.65TPtotal/(mod1AIC.65TPtotal + mod1AIC.65FPtotal)
+mod1AIC.65recall = mod1AIC.65TPtotal/(mod1AIC.65TPtotal + mod1AIC.65FNtotal)
+
+mod1AIC.35precision
+mod1AIC.35recall
+
+mod1AIC.65precision
+mod1AIC.65recall
+```
+
+```{r}
+mod1Continuous <- glm(LFT ~ time + volume + weight + angle + gap2 + velocity + belt_velocity, data = sick, family = binomial)
+mod1ContAIC <- step(mod1Continuous)
+summary(mod1ContAIC)
+```
+
+```{r}
+# accuracy of logit link with AIC on continuous variables only
+sick$mod1AICresponse.cont = predict(mod1ContAIC, sick, type="response")
+sick$mod1AICpred.cont = ifelse(sick$mod1AICresponse.cont >= 0.5, 1, 0)
+sick$mod1AICaccuracy.cont = abs(sick$LFT - sick$mod1AICpred.cont)
+m = nrow(sick)
+accuracyMod1AIC.cont = (m - sum(sick$mod1AICaccuracy.cont, na.rm=T))/m
+accuracyMod1AIC.cont
+sick$mod1AIC.contTP = ifelse(sick$mod1AICpred.cont == 1 & sick$LFT == 1, 1, 0)
+sick$mod1AIC.contFP = ifelse(sick$mod1AICpred.cont == 1 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.contTN = ifelse(sick$mod1AICpred.cont == 0 & sick$LFT == 0, 1, 0)
+sick$mod1AIC.contFN = ifelse(sick$mod1AICpred.cont == 0 & sick$LFT == 1, 1, 0)
+mod1AIC.contTPtotal = sum(sick$mod1AIC.contTP, na.rm=T)
+mod1AIC.contFPtotal = sum(sick$mod1AIC.contFP, na.rm=T)
+mod1AIC.contTNtotal = sum(sick$mod1AIC.contTN, na.rm=T)
+mod1AIC.contFNtotal = sum(sick$mod1AIC.contFN, na.rm=T)
+mod1AIC.contTPtotal
+mod1AIC.contFPtotal
+mod1AIC.contTNtotal
+mod1AIC.contFNtotal
+mod1AIC.contprecision = mod1AIC.contTPtotal/(mod1AIC.contTPtotal + mod1AIC.contFPtotal)
+mod1AIC.contrecall = mod1AIC.contTPtotal/(mod1AIC.contTPtotal + mod1AIC.contFNtotal)
+mod1AIC.contF1score = 2*mod1AIC.contprecision*mod1AIC.contrecall/(mod1AIC.contprecision+mod1AIC.contrecall)
+mod1AIC.contprecision
+mod1AIC.contrecall
+mod1AIC.contF1score
+```
+
+
